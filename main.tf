@@ -20,6 +20,50 @@ data "aws_vpc" "this" {
   id = var.vpc_id
 }
 
+# VPC Endpoint for ECR
+resource "aws_vpc_endpoint" "ecr" {
+  vpc_id       = var.vpc_id
+  service_name = "com.amazonaws.${var.aws_region}.ecr.api"
+  vpc_endpoint_type = "Interface"
+  security_group_ids = [aws_security_group.api.id] # 安全のためにセキュリティグループを設定
+  
+  policy = <<EOF
+  {
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Effect": "Allow",
+        "Principal": "*",
+        "Action": "ecr:*",
+        "Resource": "*"
+      }
+    ]
+  }
+  EOF
+}
+
+resource "aws_vpc_endpoint" "ecr_docker" {
+  vpc_id       = var.vpc_id
+  service_name = "com.amazonaws.${var.aws_region}.ecr.dkr"
+  vpc_endpoint_type = "Interface"
+  security_group_ids = [aws_security_group.web.id] # 安全のためにセキュリティグループを設定
+  
+  policy = <<EOF
+  {
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Effect": "Allow",
+        "Principal": "*",
+        "Action": "ecr:*",
+        "Resource": "*"
+      }
+    ]
+  }
+  EOF
+}
+
+
 # Redis
 
 resource "aws_security_group" "redis" {
@@ -68,6 +112,7 @@ resource "aws_elasticache_replication_group" "redis" {
   #   --auth-token ${REDIS_PASSWORD} \
   #   --auth-token-update-strategy SET \
   #   --apply-immediately
+
 
   maintenance_window       = "sat:18:00-sat:19:00"
   snapshot_window          = "20:00-21:00"
@@ -280,7 +325,7 @@ resource "aws_ssm_parameter" "db_password" {
   name  = "${local.ssm_parameter_prefix}/DB_PASSWORD"
   value = var.dify_db_password
   lifecycle {
-    ignore_changes = [value]
+#     ignore_changes = [value]
   }
 }
 
@@ -402,7 +447,7 @@ resource "aws_ecs_task_definition" "dify_api" {
           # It is consistent with the configuration in the 'redis' service below.
           REDIS_HOST    = aws_elasticache_replication_group.redis.primary_endpoint_address
           REDIS_PORT    = aws_elasticache_replication_group.redis.port
-          REDIS_USE_SSL = true
+          REDIS_USE_SSL = false
           # use redis db 0 for redis cache
           REDIS_DB = 0
           # Specifies the allowed origins for cross-origin requests to the Web API, e.g. https://dify.app or * for all origins.
@@ -601,28 +646,19 @@ resource "aws_security_group_rule" "alb_to_api" {
   source_security_group_id = aws_security_group.alb.id
 }
 
-resource "aws_security_group_rule" "api_to_database" {
-  security_group_id        = aws_security_group.database.id
+#不要かも
+resource "aws_security_group_rule" "db_to_api" {
+  security_group_id        = aws_security_group.api.id
   type                     = "ingress"
-  description              = "API to Database"
+  description              = "DB to API"
   protocol                 = "tcp"
-  from_port                = 5432
-  to_port                  = 5432
-  source_security_group_id = aws_security_group.api.id
-}
-
-resource "aws_security_group_rule" "api_to_redis" {
-  security_group_id        = aws_security_group.redis.id
-  type                     = "ingress"
-  description              = "API to Redis"
-  protocol                 = "tcp"
-  from_port                = 6379
-  to_port                  = 6379
-  source_security_group_id = aws_security_group.api.id
+  from_port                = 5001
+  to_port                  = 5001
+  source_security_group_id = aws_security_group.database.id
 }
 
 
-# Dify Worker Task
+
 resource "aws_ecs_task_definition" "dify_worker" {
   family                   = "dify-worker"
   execution_role_arn       = aws_iam_role.exec.arn
@@ -856,10 +892,50 @@ resource "aws_security_group_rule" "web_to_internet" {
   cidr_blocks       = ["0.0.0.0/0"]
 }
 
+resource "aws_security_group_rule" "web_to_database" {
+  security_group_id        = aws_security_group.database.id
+  type                     = "ingress"
+  description              = "Web to Database"
+  protocol                 = "tcp"
+  from_port                = 5432
+  to_port                  = 5432
+  source_security_group_id = aws_security_group.web.id
+}
+
+resource "aws_security_group_rule" "api_to_database" {
+  security_group_id        = aws_security_group.database.id
+  type                     = "ingress"
+  description              = "api to Database"
+  protocol                 = "tcp"
+  from_port                = 5432
+  to_port                  = 5432
+  source_security_group_id = aws_security_group.api.id
+}
+
+resource "aws_security_group_rule" "web_to_redis" {
+  security_group_id        = aws_security_group.redis.id
+  type                     = "ingress"
+  description              = "Web to Redis"
+  protocol                 = "tcp"
+  from_port                = 6379
+  to_port                  = 6379
+  source_security_group_id = aws_security_group.web.id
+}
+
+resource "aws_security_group_rule" "api_to_redis" {
+  security_group_id        = aws_security_group.redis.id
+  type                     = "ingress"
+  description              = "api to Redis"
+  protocol                 = "tcp"
+  from_port                = 6379
+  to_port                  = 6379
+  source_security_group_id = aws_security_group.api.id
+}
+
 resource "aws_security_group_rule" "alb_to_web" {
   security_group_id        = aws_security_group.web.id
   type                     = "ingress"
-  description              = "ALB to Web"
+  description              = "alb_to_web"
   protocol                 = "tcp"
   from_port                = 3000
   to_port                  = 3000
@@ -884,6 +960,18 @@ resource "aws_security_group_rule" "alb_to_targetgroup" {
   to_port           = 0
   cidr_blocks       = [data.aws_vpc.this.cidr_block]
 }
+
+resource "aws_security_group_rule" "internet_to_alb" {
+  security_group_id = aws_security_group.alb.id
+  type              = "ingress"
+  description       = "Internet to ALB"
+  protocol          = "tcp"
+  from_port         = 80
+  to_port           = 80
+  cidr_blocks       =  ["0.0.0.0/0"]
+}
+
+
 
 resource "aws_security_group_rule" "http_from_internet" {
   security_group_id = aws_security_group.alb.id
