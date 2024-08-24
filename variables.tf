@@ -23,6 +23,12 @@ variable "public_subnet_ids" {
   type = list(string)
 }
 
+
+variable "private_route_table_ids" {
+  type = list(string)  # List of route table IDs
+}
+
+
 # Redis
 
 variable "redis_password" {
@@ -58,7 +64,7 @@ variable "dify_sandbox_version" {
 }
 
 variable "migration_enabled" {
-  default = "false"
+  default = "true"
 }
 
 variable "dify_db_username" {
