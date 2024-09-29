@@ -100,6 +100,8 @@ resource "aws_elasticache_replication_group" "redis" {
   auth_token_update_strategy = "SET"
   auth_token                 = var.redis_password
 
+  apply_immediately = true  # 変更を即座に適用
+
   # auth token を後から変更する場合（ROTATE して SET する）
   # REDIS_PASSWORD='put your redis password'
   # aws elasticache modify-replication-group \
@@ -112,7 +114,6 @@ resource "aws_elasticache_replication_group" "redis" {
   #   --auth-token ${REDIS_PASSWORD} \
   #   --auth-token-update-strategy SET \
   #   --apply-immediately
-
 
   maintenance_window       = "sat:18:00-sat:19:00"
   snapshot_window          = "20:00-21:00"
@@ -345,7 +346,7 @@ resource "aws_ssm_parameter" "broker_url" {
   name       = "${local.ssm_parameter_prefix}/CELERY_BROKER_URL"
   value      = "rediss://:${var.redis_password}@${aws_elasticache_replication_group.redis.primary_endpoint_address}:6379/0" # ElastiCache Redis では db0 以外使えない
   lifecycle {
-    # ignore_changes = [value]
+     ignore_changes = [value]
   }
 }
 
@@ -447,7 +448,7 @@ resource "aws_ecs_task_definition" "dify_api" {
           # It is consistent with the configuration in the 'redis' service below.
           REDIS_HOST    = aws_elasticache_replication_group.redis.primary_endpoint_address
           REDIS_PORT    = aws_elasticache_replication_group.redis.port
-          REDIS_USE_SSL = false
+          REDIS_USE_SSL = true
           # use redis db 0 for redis cache
           REDIS_DB = 0
           # Specifies the allowed origins for cross-origin requests to the Web API, e.g. https://dify.app or * for all origins.
@@ -646,6 +647,16 @@ resource "aws_security_group_rule" "alb_to_api" {
   source_security_group_id = aws_security_group.alb.id
 }
 
+resource "aws_security_group_rule" "api_to_database" {
+  security_group_id        = aws_security_group.database.id
+  type                     = "ingress"
+  description              = "API to Database"
+  protocol                 = "tcp"
+  from_port                = 5432
+  to_port                  = 5432
+  source_security_group_id = aws_security_group.api.id
+}
+
 #不要かも
 resource "aws_security_group_rule" "db_to_api" {
   security_group_id        = aws_security_group.api.id
@@ -657,8 +668,18 @@ resource "aws_security_group_rule" "db_to_api" {
   source_security_group_id = aws_security_group.database.id
 }
 
+resource "aws_security_group_rule" "api_to_redis" {
+  security_group_id        = aws_security_group.redis.id
+  type                     = "ingress"
+  description              = "API to Redis"
+  protocol                 = "tcp"
+  from_port                = 6379
+  to_port                  = 6379
+  source_security_group_id = aws_security_group.api.id
+}
 
 
+# Dify Worker Task
 resource "aws_ecs_task_definition" "dify_worker" {
   family                   = "dify-worker"
   execution_role_arn       = aws_iam_role.exec.arn
@@ -840,6 +861,7 @@ resource "aws_ecs_task_definition" "dify_web" {
           # # console or api domain.
           # # example: http://udify.app
           APP_API_URL = "http://${aws_lb.dify.dns_name}"
+          NEXT_TELEMETRY_DISABLED = "0"
         } : { name = name, value = tostring(value) }
       ]
       portMappings = [
@@ -902,16 +924,6 @@ resource "aws_security_group_rule" "web_to_database" {
   source_security_group_id = aws_security_group.web.id
 }
 
-resource "aws_security_group_rule" "api_to_database" {
-  security_group_id        = aws_security_group.database.id
-  type                     = "ingress"
-  description              = "api to Database"
-  protocol                 = "tcp"
-  from_port                = 5432
-  to_port                  = 5432
-  source_security_group_id = aws_security_group.api.id
-}
-
 resource "aws_security_group_rule" "web_to_redis" {
   security_group_id        = aws_security_group.redis.id
   type                     = "ingress"
@@ -922,20 +934,10 @@ resource "aws_security_group_rule" "web_to_redis" {
   source_security_group_id = aws_security_group.web.id
 }
 
-resource "aws_security_group_rule" "api_to_redis" {
-  security_group_id        = aws_security_group.redis.id
-  type                     = "ingress"
-  description              = "api to Redis"
-  protocol                 = "tcp"
-  from_port                = 6379
-  to_port                  = 6379
-  source_security_group_id = aws_security_group.api.id
-}
-
 resource "aws_security_group_rule" "alb_to_web" {
   security_group_id        = aws_security_group.web.id
   type                     = "ingress"
-  description              = "alb_to_web"
+  description              = "ALB to Web"
   protocol                 = "tcp"
   from_port                = 3000
   to_port                  = 3000
