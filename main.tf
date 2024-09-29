@@ -100,8 +100,6 @@ resource "aws_elasticache_replication_group" "redis" {
   auth_token_update_strategy = "SET"
   auth_token                 = var.redis_password
 
-  apply_immediately = true  # 変更を即座に適用
-
   # auth token を後から変更する場合（ROTATE して SET する）
   # REDIS_PASSWORD='put your redis password'
   # aws elasticache modify-replication-group \
@@ -678,6 +676,16 @@ resource "aws_security_group_rule" "api_to_redis" {
   source_security_group_id = aws_security_group.api.id
 }
 
+#不要かも
+resource "aws_security_group_rule" "web_to_redis" {
+  security_group_id        = aws_security_group.redis.id
+  type                     = "ingress"
+  description              = "Web to Redis"
+  protocol                 = "tcp"
+  from_port                = 6379
+  to_port                  = 6379
+  source_security_group_id = aws_security_group.web.id
+}
 
 # Dify Worker Task
 resource "aws_ecs_task_definition" "dify_worker" {
@@ -815,6 +823,17 @@ resource "aws_security_group_rule" "worker_to_database" {
   source_security_group_id = aws_security_group.worker.id
 }
 
+#不要かも
+resource "aws_security_group_rule" "web_to_database" {
+  security_group_id        = aws_security_group.database.id
+  type                     = "ingress"
+  description              = "Web to Database"
+  protocol                 = "tcp"
+  from_port                = 5432
+  to_port                  = 5432
+  source_security_group_id = aws_security_group.web.id
+}
+
 resource "aws_security_group_rule" "worker_to_redis" {
   security_group_id        = aws_security_group.redis.id
   type                     = "ingress"
@@ -914,26 +933,6 @@ resource "aws_security_group_rule" "web_to_internet" {
   cidr_blocks       = ["0.0.0.0/0"]
 }
 
-resource "aws_security_group_rule" "web_to_database" {
-  security_group_id        = aws_security_group.database.id
-  type                     = "ingress"
-  description              = "Web to Database"
-  protocol                 = "tcp"
-  from_port                = 5432
-  to_port                  = 5432
-  source_security_group_id = aws_security_group.web.id
-}
-
-resource "aws_security_group_rule" "web_to_redis" {
-  security_group_id        = aws_security_group.redis.id
-  type                     = "ingress"
-  description              = "Web to Redis"
-  protocol                 = "tcp"
-  from_port                = 6379
-  to_port                  = 6379
-  source_security_group_id = aws_security_group.web.id
-}
-
 resource "aws_security_group_rule" "alb_to_web" {
   security_group_id        = aws_security_group.web.id
   type                     = "ingress"
@@ -963,18 +962,6 @@ resource "aws_security_group_rule" "alb_to_targetgroup" {
   cidr_blocks       = [data.aws_vpc.this.cidr_block]
 }
 
-resource "aws_security_group_rule" "internet_to_alb" {
-  security_group_id = aws_security_group.alb.id
-  type              = "ingress"
-  description       = "Internet to ALB"
-  protocol          = "tcp"
-  from_port         = 80
-  to_port           = 80
-  cidr_blocks       =  ["0.0.0.0/0"]
-}
-
-
-
 resource "aws_security_group_rule" "http_from_internet" {
   security_group_id = aws_security_group.alb.id
   type              = "ingress"
@@ -983,6 +970,17 @@ resource "aws_security_group_rule" "http_from_internet" {
   from_port         = 80
   to_port           = 80
   cidr_blocks       = var.allowed_cidr_blocks
+}
+
+#必須
+resource "aws_security_group_rule" "internet_to_alb" {
+  security_group_id = aws_security_group.alb.id
+  type              = "ingress"
+  description       = "Internet to ALB"
+  protocol          = "tcp"
+  from_port         = 80
+  to_port           = 80
+  cidr_blocks       =  ["0.0.0.0/0"]
 }
 
 resource "aws_lb" "dify" {
