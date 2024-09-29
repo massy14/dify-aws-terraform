@@ -52,19 +52,19 @@ variable "db_master_password" {
 # Dify environment
 
 variable "dify_api_version" {
-  default = "0.6.11"
+  default = "0.8.3"
 }
 
 variable "dify_web_version" {
-  default = "0.6.11"
+  default = "0.8.3"
 }
 
 variable "dify_sandbox_version" {
-  default = "0.2.1"
+  default = "0.2.9"
 }
 
 variable "migration_enabled" {
-  default = "true"
+  default = "false"
 }
 
 variable "dify_db_username" {
